@@ -1,4 +1,4 @@
-# 🍽️ GastroSynq
+# GastroSynq
 
 > Sistema ERP para Restaurantes desenvolvido utilizando arquitetura cliente-servidor, com foco em controle operacional, gestão de estoque, rastreabilidade de produtos, vendas e gestão financeira.
 
