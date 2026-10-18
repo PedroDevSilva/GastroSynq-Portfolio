@@ -4,510 +4,459 @@
 
 ## Visão Geral
 
-O GastroSynq utiliza PostgreSQL como sistema gerenciador de banco de dados relacional.
+O GastroSynq utiliza **PostgreSQL**, gerenciado pelo **Supabase** na região de São Paulo (a mesma do servidor da aplicação).
 
 O modelo foi projetado para atender operações de restaurantes que exigem:
 
-* Controle de estoque
-* Controle de validade
-* Controle de lotes
-* Rastreabilidade de produtos
-* Operação de PDV
-* Controle financeiro de caixa
-* Gestão de funcionários
-* Controle de permissões
-* Histórico operacional
+* Controle de estoque principal e da cozinha
+* Controle de lotes, validade e custo de entrada
+* Etiquetas de validade com rastreabilidade
+* Operação de PDV e controle de caixa
+* Gestão de funcionários com cargos e PIN
+* Histórico de conversas e análises da IA (HarpIA)
+* Histórico operacional completo
 
-A modelagem busca garantir integridade referencial, rastreabilidade completa e consistência transacional.
+A modelagem busca garantir integridade referencial, rastreabilidade e consistência transacional.
+
+O esquema é criado e atualizado pelo Hibernate (`ddl-auto=update`) a partir das entidades JPA. A versão atual tem **28 tabelas**.
 
 ---
 
 # Estratégia de Modelagem
 
-O banco foi dividido em domínios funcionais:
+O banco é dividido em domínios funcionais:
 
-* Segurança e usuários
-* Cadastro
-* Estoque
-* Produção e rastreabilidade
-* Vendas
-* Financeiro
+| Domínio | Tabelas |
+| --- | --- |
+| Segurança e usuários | `role`, `funcionario` |
+| Cadastro | `produto`, `fornecedor`, `tag`, `produto_venda` |
+| Estoque principal | `estoque`, `lote_estoque`, `movimentacao_estoque` |
+| Cozinha | `estoque_cozinha`, `movimentacao_cozinha` |
+| Qualidade e rastreabilidade | `estado_produto`, `regra_validade`, `produto_estado_historico`, `etiqueta`, `etiqueta_geracao`, `impressao_etiqueta`, `log_rastreabilidade` |
+| Vendas | `venda`, `item_venda`, `pagamento` |
+| Financeiro | `caixa_aberto` |
+| Inteligência artificial | `chat_diario`, `mensagem_chat`, `insight` |
+| Reservado para evolução | `cliente`, `pedido`, `item_pedido` |
 
-Essa separação reduz acoplamento e facilita futuras expansões.
+---
+
+# Diagrama de Relacionamentos (principal)
+
+```mermaid
+erDiagram
+    ROLE ||--o{ FUNCIONARIO : define
+    FORNECEDOR ||--o{ PRODUTO : fornece
+    PRODUTO ||--|| ESTOQUE : possui
+    PRODUTO ||--|| ESTOQUE_COZINHA : possui
+    PRODUTO ||--o{ LOTE_ESTOQUE : recebe
+    PRODUTO ||--o{ MOVIMENTACAO_ESTOQUE : registra
+    LOTE_ESTOQUE ||--o{ MOVIMENTACAO_ESTOQUE : origina
+    PRODUTO ||--o{ MOVIMENTACAO_COZINHA : registra
+    PRODUTO ||--o{ ETIQUETA : identifica
+    LOTE_ESTOQUE ||--o{ ETIQUETA : rastreia
+    ESTADO_PRODUTO ||--o{ ETIQUETA : classifica
+    ESTADO_PRODUTO ||--o{ REGRA_VALIDADE : define
+    ETIQUETA ||--o{ IMPRESSAO_ETIQUETA : imprime
+    ETIQUETA ||--o{ ETIQUETA_GERACAO : gera
+    FUNCIONARIO ||--o{ ETIQUETA : gera
+    FUNCIONARIO ||--o{ CAIXA_ABERTO : abre
+    CAIXA_ABERTO ||--o{ VENDA : contem
+    FUNCIONARIO ||--o{ VENDA : realiza
+    VENDA ||--o{ ITEM_VENDA : contem
+    PRODUTO_VENDA ||--o{ ITEM_VENDA : vendido
+    VENDA ||--o{ PAGAMENTO : recebe
+    CHAT_DIARIO ||--o{ MENSAGEM_CHAT : contem
+    FUNCIONARIO ||--o{ MENSAGEM_CHAT : confirma
+```
+
+O diagrama completo está em `assets/diagrams/erd_completo.png`.
 
 ---
 
 # Domínio de Segurança
 
-## Role
+## role
 
-Responsável pelo controle de permissões.
+Define os cargos do sistema.
 
-### Campos principais
+| Campo | Descrição |
+| --- | --- |
+| `id` | Identificador |
+| `nome` | Nome do cargo (Funcionário, Gerente, Admin) |
+| `nivel_permissao` | Nível numérico usado para comparar cargos |
 
-* id
-* nome
-* nivel_permissao
-
-### Responsabilidade
-
-Define o conjunto de permissões associado aos usuários do sistema.
+O nível permite regras como "ninguém cria um funcionário com cargo acima do seu".
 
 ---
 
-## Funcionario
+## funcionario
 
-Representa usuários autenticáveis.
+Usuários autenticáveis.
 
-### Campos principais
-
-* id
-* nome
-* email
-* cpf
-* senha
-* ativo
-* role_id
+| Campo | Descrição |
+| --- | --- |
+| `id` | Identificador |
+| `nome`, `email`, `cpf` | Dados cadastrais |
+| `senha` | Hash BCrypt |
+| `pin` | Hash do PIN de 4 dígitos, único no sistema, usado para confirmar ações da HarpIA |
+| `ativo` | Exclusão lógica: funcionário desativado não faz login, mas o histórico é preservado |
+| `data_admissao` | Data de admissão |
+| `role_id` | Cargo |
 
 ### Relacionamentos
 
-* N:1 Role
-* 1:N Venda
-* 1:N CaixaAberto
-* 1:N Etiqueta
-* 1:N MovimentacaoEstoque
-
-### Responsabilidade
-
-Controlar autenticação, autorização e rastreabilidade das ações realizadas.
-
----
-
-# Domínio Comercial
-
-## ProdutoVenda
-
-Catálogo simplificado utilizado pelo PDV.
-
-### Campos principais
-
-* id
-* nome
-* preco
-* ativo
-
-### Responsabilidade
-
-Representar produtos disponíveis para comercialização.
-
----
-
-## Venda
-
-Registro principal das operações comerciais.
-
-### Campos principais
-
-* id
-* data_venda
-* valor_total
-* funcionario_id
-* caixa_id
-
-### Relacionamentos
-
-* N:1 Funcionario
-* N:1 CaixaAberto
-* 1:N ItemVenda
-* 1:1 Pagamento
-
-### Responsabilidade
-
-Centralizar a transação de venda.
-
----
-
-## ItemVenda
-
-Itens pertencentes a uma venda.
-
-### Campos principais
-
-* quantidade
-* preco_unitario
-* subtotal
-
-### Relacionamentos
-
-* N:1 Venda
-* N:1 ProdutoVenda
-
-### Responsabilidade
-
-Registrar os produtos efetivamente vendidos.
-
----
-
-## Pagamento
-
-Registro financeiro associado à venda.
-
-### Campos principais
-
-* metodo
-* valor
-* status
-* nota_fiscal
-* transacao_id
-
-### Relacionamentos
-
-* N:1 Venda
-* N:1 Funcionario
-
-### Responsabilidade
-
-Controlar o recebimento financeiro da operação.
-
----
-
-# Domínio Financeiro
-
-## CaixaAberto
-
-Representa sessões operacionais de caixa.
-
-### Campos principais
-
-* data_abertura
-* data_fechamento
-* valor_inicial
-* valor_final
-* aberto
-
-### Relacionamentos
-
-* N:1 Funcionario
-* 1:N Venda
-
-### Responsabilidade
-
-Garantir auditoria financeira diária.
+* N:1 `role`
+* 1:N `venda`, `caixa_aberto`, `etiqueta`, `movimentacao_estoque`, `movimentacao_cozinha`, `mensagem_chat`
 
 ---
 
 # Domínio de Cadastro
 
-## Fornecedor
+## produto
 
-Cadastro de fornecedores.
+Insumos e itens controlados no estoque.
 
-### Campos principais
+| Campo | Descrição |
+| --- | --- |
+| `id`, `nome`, `descricao` | Identificação |
+| `unidade_medida` | kg, un, L... |
+| `preco` | Preço de compra atual (atualizado pela última entrada com preço) |
+| `perecivel` | Se o produto vence |
+| `controla_lote` | Se as entradas são controladas por lote |
+| `validade_padrao` | Validade sugerida na entrada |
+| `ativo` | Exclusão lógica |
+| `fornecedor_id` | Fornecedor (opcional) |
 
-* nome
-* cnpj
-* telefone
-* email
-
-### Relacionamentos
-
-* 1:N Produto
-
-### Responsabilidade
-
-Gerenciar origem dos insumos e mercadorias.
+Ao cadastrar um produto, os registros de `estoque` e `estoque_cozinha` são criados zerados.
 
 ---
 
-## Produto
+## fornecedor
 
-Representa itens controlados em estoque.
-
-### Campos principais
-
-* nome
-* descricao
-* preco
-* controla_lote
-* perecivel
-* estoque_minimo
-
-### Relacionamentos
-
-* N:1 Fornecedor
-* 1:N Estoque
-* 1:N LoteEstoque
-* 1:N MovimentacaoEstoque
-* 1:N Etiqueta
-
-### Responsabilidade
-
-Centralizar informações operacionais dos produtos.
+| Campo | Descrição |
+| --- | --- |
+| `id`, `nome`, `email`, `observacao` | Dados cadastrais |
+| `cnpj`, `telefone` | Gravados apenas com dígitos (formatação fica na tela) |
 
 ---
 
-## Tag
+## produto_venda
 
-Etiquetas de categorização.
+Cardápio do PDV — o que o cliente compra (ex.: "Coca lata 350ml", "Misto quente").
 
-### Relacionamentos
+| Campo | Descrição |
+| --- | --- |
+| `id`, `nome` | Identificação |
+| `preco` | Preço de venda |
+| `ativo` | Só itens ativos podem ser vendidos |
 
-* N:1 Produto
-
-### Responsabilidade
-
-Facilitar classificação e busca.
-
----
-
-# Domínio de Estoque
-
-## Estoque
-
-Representa posição atual do estoque.
-
-### Campos principais
-
-* quantidade
-* minimo_alertas
-* data_atualizacao
-
-### Relacionamentos
-
-* N:1 Produto
-* N:1 EstadoProduto
-
-### Responsabilidade
-
-Controlar disponibilidade atual dos produtos.
+O cardápio é separado do cadastro de insumos (`produto`): um item de cardápio pode usar vários insumos, e um insumo pode compor vários itens.
 
 ---
 
-## LoteEstoque
+## tag
 
-Controle individualizado por lote.
-
-### Campos principais
-
-* id_lote
-* data_entrada
-* data_validade
-* qtd_atual
-
-### Relacionamentos
-
-* N:1 Produto
-
-### Responsabilidade
-
-Permitir rastreamento de origem e validade.
+Marcadores livres associados a produtos.
 
 ---
 
-## MovimentacaoEstoque
+# Domínio de Estoque Principal
 
-Histórico de entradas e saídas.
+## estoque
 
-### Campos principais
+Saldo atual de cada produto no estoque principal.
 
-* tipo
-* quantidade
-* observacao
-* data_movimentacao
+| Campo | Descrição |
+| --- | --- |
+| `produto_id` | Produto |
+| `quantidade` | Saldo atual |
+| `estoque_minimo` | Abaixo disso, o produto aparece nos alertas e na HarpIA |
+| `data_atualizacao` | Última alteração |
 
-### Relacionamentos
+---
 
-* N:1 Produto
-* N:1 LoteEstoque
-* N:1 Funcionario
+## lote_estoque
 
-### Responsabilidade
+Cada entrada de mercadoria gera um lote.
 
-Registrar toda alteração realizada no estoque.
+| Campo | Descrição |
+| --- | --- |
+| `id_lote` | Código do lote |
+| `data_entrada` | Data da entrada |
+| `data_validade` | Validade (editável na entrada; não aceita data passada) |
+| `qtd_atual` | Quanto ainda resta do lote |
+| `custo_unitario` | Preço pago por unidade nessa entrada (opcional) |
+| `produto_id` | Produto |
+
+O custo por lote permite calcular o valor do estoque e comparar preços ao longo do tempo.
+
+---
+
+## movimentacao_estoque
+
+Histórico de tudo que entra e sai do estoque principal.
+
+| Campo | Descrição |
+| --- | --- |
+| `tipo_movimentacao` | `ENTRADA`, `MANIPULACAO` (envio para a cozinha), `PERDA`, `AJUSTE` |
+| `qtd` | Quantidade |
+| `observacao` | Motivo / detalhe |
+| `data_movimentacao` | Data e hora |
+| `produto_id`, `lote_id` | Produto e lote afetados |
+| `funcionario_id` | Quem fez a movimentação |
+
+### Regra de saída
+
+Um produto só sai do estoque principal de duas formas:
+
+* **Para a cozinha** (`MANIPULACAO`) — com etiqueta de validade, ou sem etiqueta para itens prontos como bebidas em lata.
+* **Como perda** (`PERDA`) — consome primeiro os lotes vencidos.
+
+---
+
+# Domínio da Cozinha
+
+## estoque_cozinha
+
+Saldo de cada produto que já foi enviado para a cozinha.
+
+| Campo | Descrição |
+| --- | --- |
+| `produto_id`, `quantidade` | Produto e saldo |
+| `estoque_minimo` | Mínimo da cozinha |
+| `data_atualizacao` | Última alteração |
+
+## movimentacao_cozinha
+
+| Campo | Descrição |
+| --- | --- |
+| `tipo_movimentacao` | `ENTRADA` (vinda do estoque), `SAIDA` (uso), `PERDA` |
+| `quantidade`, `observacao`, `data_movimentacao` | Detalhes |
+| `produto_id`, `funcionario_id` | Produto e responsável |
+
+A transferência para a cozinha grava, na **mesma transação**, a saída em `movimentacao_estoque` e a entrada em `movimentacao_cozinha`.
 
 ---
 
 # Domínio de Qualidade e Rastreabilidade
 
-## EstadoProduto
+## estado_produto
 
-Estados operacionais do produto.
+Estados de manipulação do produto (ex.: resfriado, congelado, aberto, manipulado), que definem a validade.
 
-### Exemplos
+## regra_validade
 
-* Cru
-* Preparado
-* Resfriado
-* Congelado
-* Descartado
+| Campo | Descrição |
+| --- | --- |
+| `estado_produto_id` | Estado |
+| `dias_validade` | Quantos dias o produto dura nesse estado |
+| `ativo` | Regra em uso |
 
-### Responsabilidade
+## produto_estado_historico
 
-Padronizar o ciclo de vida operacional.
+Histórico de mudanças de estado de cada produto (`data_inicio`, `data_fim`, `origem`, responsável).
 
----
+## etiqueta
 
-## RegraValidade
+Etiqueta de validade gerada para um produto manipulado.
 
-Configuração de validade por estado.
+| Campo | Descrição |
+| --- | --- |
+| `produto_id`, `lote_estoque_id` | O que foi etiquetado e de qual lote veio |
+| `estado_produto_id` | Estado que determinou a validade |
+| `quantidade` | Quantidade etiquetada |
+| `lote` | Código do lote impresso |
+| `data_geracao` | Quando foi gerada (mantida em reimpressões) |
+| `validade_calculada` | Validade a partir da regra do estado |
+| `funcionario_id` | Responsável (impresso como "Resp:") |
+| `produto_estado_historico_id` | Registro de estado correspondente |
 
-### Campos principais
+A geração da etiqueta valida a regra de validade **antes** de movimentar o estoque, em uma única transação.
 
-* dias_validade
-* ativo
+## etiqueta_geracao
 
-### Relacionamentos
+Registro técnico de cada geração (payload enviado e status).
 
-* N:1 EstadoProduto
+## impressao_etiqueta
 
-### Responsabilidade
+Controle de impressão: `status`, `tentativas`, `log_erro`, `quantidade`, `data_envio`.
 
-Automatizar cálculo de validade.
+## log_rastreabilidade
 
----
-
-## ProdutoEstadoHistorico
-
-Histórico de mudanças de estado.
-
-### Campos principais
-
-* data_inicio
-* data_fim
-* origem
-
-### Relacionamentos
-
-* N:1 Produto
-* N:1 EstadoProduto
-* N:1 Funcionario
-
-### Responsabilidade
-
-Garantir rastreabilidade completa.
+Auditoria de ações sobre produtos e etiquetas: `acao`, `descricao`, `data`, produto, etiqueta e funcionário.
 
 ---
 
-## Etiqueta
+# Domínio de Vendas
 
-Representação física do produto identificado.
+## venda
 
-### Campos principais
+| Campo | Descrição |
+| --- | --- |
+| `data_venda` | Data e hora |
+| `valor_total` | Total da venda |
+| `funcionario_id` | Quem vendeu (pelo PDV, a sessão; pela HarpIA, o dono do PIN) |
+| `caixa_id` | Caixa em que a venda entrou |
 
-* lote
-* data_geracao
-* validade_calculada
+## item_venda
 
-### Relacionamentos
+| Campo | Descrição |
+| --- | --- |
+| `venda_id` | Venda |
+| `produto_venda_id` | Item do cardápio |
+| `quantidade`, `preco_unitario`, `subtotal` | Valores congelados no momento da venda |
 
-* N:1 Produto
-* N:1 Funcionario
-* N:1 LoteEstoque
+O preço é copiado para o item: mudar o preço do cardápio depois não altera vendas antigas.
 
-### Responsabilidade
+## pagamento
 
-Identificar produtos fisicamente.
-
----
-
-## EtiquetaGeracao
-
-Registro de geração das etiquetas.
-
-### Responsabilidade
-
-Auditoria de criação.
-
----
-
-## ImpressaoEtiqueta
-
-Controle de impressão.
-
-### Campos principais
-
-* status
-* tentativas
-* log_erro
-
-### Responsabilidade
-
-Monitorar integração com impressoras.
+| Campo | Descrição |
+| --- | --- |
+| `venda_id` | Venda |
+| `metodo_pagamento` | Dinheiro, Pix ou cartão |
+| `valor`, `data_pagamento`, `status` | Detalhes |
+| `transacao_id`, `nota_fiscal` | Reservados para integração com meios de pagamento e emissão fiscal |
+| `funcionario_id` | Responsável |
 
 ---
 
-## LogRastreabilidade
+# Domínio Financeiro
 
-Registro de auditoria operacional.
+## caixa_aberto
 
-### Campos principais
+| Campo | Descrição |
+| --- | --- |
+| `funcionario_id` | Quem abriu |
+| `data_abertura`, `data_fechamento` | Período do caixa |
+| `aberto` | Se ainda está aberto |
+| `valor_inicial` | Troco na abertura |
+| `valor_esperado` | Quanto deveria haver na gaveta: valor inicial + vendas em **dinheiro** (Pix e cartão são contabilizados à parte) |
+| `valor_final` | Valor contado no fechamento (fica vazio quando o caixa é fechado automaticamente) |
 
-* acao
-* descricao
-* data
-
-### Responsabilidade
-
-Garantir histórico completo das operações.
+Um caixa esquecido aberto é fechado automaticamente às 05:00.
 
 ---
 
-# Fluxo Transacional
+# Domínio de Inteligência Artificial
+
+## chat_diario
+
+Uma conversa por dia (`data` com restrição de unicidade).
+
+## mensagem_chat
+
+| Campo | Descrição |
+| --- | --- |
+| `chat_diario_id` | Dia da conversa |
+| `remetente` | `FUNCIONARIO` ou `IA` |
+| `tipo` | `TEXTO` ou `AUDIO` |
+| `conteudo` | Texto da mensagem |
+| `enviado_em` | Data e hora |
+| `funcionario_id` | Preenchido nas confirmações, com o dono do PIN |
+
+## insight
+
+Análises automáticas geradas pela HarpIA.
+
+| Campo | Descrição |
+| --- | --- |
+| `modulo` | `estoque`, `etiquetas` ou `pdv` |
+| `nivel` | Nível de alerta |
+| `comentario` | Texto da análise |
+| `data_criacao` | Quando foi gerado |
+
+---
+
+# Tabelas Reservadas
+
+`cliente`, `pedido` e `item_pedido` foram modeladas para uma futura funcionalidade de pedidos/delivery com cadastro de clientes e **não são usadas** pela versão atual.
+
+---
+
+# Fluxos Transacionais
 
 ## Venda
 
-1. Caixa aberto
-2. Produtos adicionados ao carrinho
+1. Caixa aberto verificado
+2. Itens validados no cardápio (apenas ativos)
 3. Venda criada
-4. Itens registrados
+4. Itens registrados com preço congelado
 5. Pagamento registrado
-6. Estoque atualizado
-7. Auditoria registrada
+6. Valor esperado do caixa atualizado (vendas em dinheiro)
 
----
+Tudo em uma transação: se uma etapa falha, nada é gravado.
 
-## Controle de Lotes
+## Entrada de Estoque
 
-1. Entrada de lote
-2. Associação ao produto
-3. Controle de validade
-4. Movimentações registradas
-5. Consumo rastreável
+1. Lote criado (validade, quantidade, custo unitário)
+2. Saldo do estoque atualizado
+3. Preço atual do produto atualizado (se informado)
+4. Movimentação `ENTRADA` registrada com o funcionário
 
----
+## Envio para a Cozinha
 
-## Impressão de Etiquetas
+1. Saldo do estoque principal verificado
+2. Lotes consumidos
+3. Movimentação `MANIPULACAO` no estoque
+4. Saldo da cozinha atualizado
+5. Movimentação `ENTRADA` na cozinha
 
-1. Produto selecionado
+## Etiqueta
+
+1. Regra de validade do estado verificada
 2. Validade calculada
-3. Etiqueta criada
-4. Registro de impressão
-5. Log armazenado
+3. Produto transferido para a cozinha (mesma transação)
+4. Etiqueta registrada com responsável
+5. Impressão registrada
 
 ---
 
 # Estratégias de Integridade
 
 * Chaves primárias em todas as entidades
-* Foreign Keys para relacionamentos críticos
-* Restrições de unicidade em CPF, Email e CNPJ
-* Controle transacional via Spring Data JPA
-* Auditoria de operações críticas
+* Chaves estrangeiras nos relacionamentos
+* Unicidade em CPF, e-mail e data do chat diário; PIN único garantido pela aplicação
+* Transações com `@Transactional` nas operações que alteram mais de uma tabela
+* **Exclusão lógica** (`ativo`) em funcionários, produtos e cardápio, preservando o histórico
+* Valores de venda congelados nos itens
+* Funcionário responsável registrado em todas as movimentações
+
+---
+
+# Desempenho
+
+* **Mesma região** do servidor (São Paulo): consultas em poucos milissegundos de rede.
+* **Pool fixo de 4 conexões** (HikariCP) dentro do limite de 15 do session pooler.
+* **`default_batch_fetch_size=50`**: relacionamentos carregados em lote, evitando consultas N+1.
+
+Detalhes em [DESEMPENHO.md](DESEMPENHO.md).
 
 ---
 
 # Estratégias de Indexação
 
-Índices recomendados:
+Índices recomendados para crescimento do volume:
 
-* funcionario(email)
-* funcionario(cpf)
-* produto(nome)
-* lote_estoque(id_lote)
-* venda(data_venda)
-* pagamento(data_pagamento)
-* caixa_aberto(aberto)
-* movimentacao_estoque(data_movimentacao)
+* `funcionario(email)`, `funcionario(cpf)`
+* `produto(nome)`
+* `lote_estoque(produto_id, data_validade)`
+* `venda(data_venda)`
+* `pagamento(data_pagamento)`
+* `caixa_aberto(aberto)`
+* `movimentacao_estoque(data_movimentacao)`
+* `mensagem_chat(chat_diario_id, enviado_em)`
+* `insight(modulo, data_criacao)`
+
+---
+
+# Débitos Técnicos Conhecidos
+
+Como o esquema evolui por `ddl-auto=update`, colunas renomeadas no código permanecem no banco:
+
+* `venda.caixa_abeto_id` — coluna antiga, substituída por `caixa_id`
+* `pagamento.metodo` — coluna antiga, substituída por `metodo_pagamento`
+
+Para uma versão de produção, a recomendação é adotar migrações versionadas (Flyway ou Liquibase) e remover essas colunas.
 
 ---
 
@@ -515,17 +464,14 @@ Garantir histórico completo das operações.
 
 Possíveis evoluções futuras:
 
-* Particionamento de vendas por período
-* Particionamento de logs de rastreabilidade
-* Cache para consultas frequentes
-* Read Replicas PostgreSQL
-* Eventos assíncronos para auditoria
-* Integração com mensageria (RabbitMQ/Kafka)
+* Migrações versionadas (Flyway)
+* Particionamento de vendas e logs por período
+* Read replicas PostgreSQL
+* Backup automatizado adicional (`pg_dump` agendado)
+* Separação por unidade (multi-restaurante)
 
 ---
 
 # Considerações Finais
 
-O modelo foi desenvolvido para atender cenários reais de operação gastronômica, priorizando integridade, rastreabilidade, auditabilidade e manutenção de longo prazo.
-
-A estrutura suporta expansão para múltiplas unidades, integração com sistemas externos e crescimento gradual da plataforma.
+O modelo foi desenvolvido para cenários reais de operação gastronômica, priorizando integridade, rastreabilidade e auditabilidade. Toda movimentação de estoque, venda, etiqueta e ação da IA registra **quem** fez e **quando**, permitindo reconstruir a história de cada produto — da entrada no estoque até a cozinha ou o descarte.
