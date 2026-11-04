@@ -235,25 +235,48 @@ Principais otimizações: banco migrado para a mesma região do servidor, elimin
 
 # Demonstração Visual
 
-## Login
+> Dados de teste. E-mail e CPF de funcionários aparecem ocultados (LGPD).
 
-![Login](assets/screenshots/login.png)
+## Fluxos do sistema
+
+| Fluxo | Demonstração |
+| --- | --- |
+| Login e alerta de validade ao abrir o sistema | ![Login e alerta](assets/gifs/login_alerta_validade.gif) |
+| Estoque por lote: vencido em vermelho, entrada de um novo lote | ![Estoque por lote](assets/gifs/estoque_por_lote.gif) |
+| Etiqueta com validade calculada pelo estado do produto | ![Etiqueta](assets/gifs/etiqueta_validade.gif) |
+| PDV: abertura de caixa, vendas e fechamento conferido | ![PDV e caixa](assets/gifs/pdv_caixa.gif) |
+| HarpIA: PIN de funcionário recusado, PIN de gerente aceito | ![HarpIA com PIN](assets/gifs/harpia_confirmacao_pin.gif) |
+| Telas por cargo e menu do funcionário | ![Telas por cargo](assets/gifs/telas_por_cargo.gif) |
+
+## HarpIA
+
+Fluxo de um pedido: a IA sugere a ação, a API confere as regras e a pessoa confirma com o PIN.
+
+![Fluxo da HarpIA](assets/diagrams/fluxo_harpia.png)
+
+![Confirmação por PIN](assets/screenshots/harpia/confirmacao_pin.png)
+
+## Etiquetas de validade
+
+| Tela de impressão | Etiqueta impressa na Niimbot B1 |
+| --- | --- |
+| ![Impressão de etiquetas](assets/screenshots/etiquetas/impressao_etiquetas.png) | ![Etiqueta impressa](assets/screenshots/etiquetas/etiqueta_impressa.png) |
+
+## Estoque e alertas
+
+![Gestão de estoque](assets/screenshots/gestao_estoque/gestao_estoque.png)
+
+![Alerta de validade](assets/screenshots/painel/alerta_validade.png)
 
 ## PDV
 
 ![PDV](assets/screenshots/pdv/pdv.png)
 
-## Gestão de Estoque
+## Arquitetura e banco de dados
 
-![Gestão de Estoque](assets/screenshots/gestao_estoque/gestao_estoque.png)
+![Arquitetura](assets/diagrams/arquitetura.png)
 
-## Fluxos
-
-| Fluxo | Demonstração |
-| --- | --- |
-| Login e autenticação | ![Login](assets/gifs/fluxo_login_autenticacao.gif) |
-| Gestão de estoque | ![Estoque](assets/gifs/fluxo_gestao_estoque.gif) |
-| Impressão de etiqueta | ![Impressão](assets/gifs/fluxo_impressao.gif) |
+![Tabelas por módulo](assets/diagrams/banco_por_modulo.png)
 
 Mais imagens em [`assets/screenshots`](assets/screenshots).
 
